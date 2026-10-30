@@ -40,7 +40,7 @@ function lookWorker(): Worker | null {
 }
 
 /** Sends a copy, so the original pixels survive if the worker fails. */
-function processInWorker(target: Worker, image: ImageData, look: LookSlug): Promise<ImageData> {
+function processInWorker(target: Worker, image: ImageData, look: LookSlug, seed: number): Promise<ImageData> {
     return new Promise((resolve, reject) => {
         const id = nextJobId++;
         const buffer = image.data.slice().buffer as ArrayBuffer;
@@ -49,15 +49,15 @@ function processInWorker(target: Worker, image: ImageData, look: LookSlug): Prom
             resolve: (result) => resolve(new ImageData(new Uint8ClampedArray(result), image.width, image.height)),
             reject: () => reject(new Error('The look worker stopped.')),
         });
-        target.postMessage({ id, buffer, width: image.width, height: image.height, look }, [buffer]);
+        target.postMessage({ id, buffer, width: image.width, height: image.height, look, seed }, [buffer]);
     });
 }
 
-async function processInChunks(image: ImageData, look: LookSlug): Promise<ImageData> {
+async function processInChunks(image: ImageData, look: LookSlug, seed: number): Promise<ImageData> {
     const definition = lookFor(look);
 
     for (let row = 0; row < image.height; row += ROWS_PER_CHUNK) {
-        applyLookToPixels(image.data, image.width, image.height, definition, row, Math.min(image.height, row + ROWS_PER_CHUNK));
+        applyLookToPixels(image.data, image.width, image.height, definition, row, Math.min(image.height, row + ROWS_PER_CHUNK), seed);
         // Let the browser paint between chunks.
         await new Promise((resolve) => window.setTimeout(resolve, 0));
     }
@@ -69,16 +69,17 @@ async function processInChunks(image: ImageData, look: LookSlug): Promise<ImageD
  * Applies a look to everything drawn on `context` so far. Uses a Web Worker
  * where available, otherwise small chunks on the main thread, so the review
  * screen stays responsive. Never relies on ctx.filter (unreliable on Safari).
+ * `seed` varies the film grain, e.g. per boomerang frame.
  */
-export async function applyLook(context: Canvas2D, width: number, height: number, look: LookSlug): Promise<void> {
+export async function applyLook(context: Canvas2D, width: number, height: number, look: LookSlug, seed = 0): Promise<void> {
     const image = context.getImageData(0, 0, width, height);
     const target = lookWorker();
     let result: ImageData;
 
     try {
-        result = target ? await processInWorker(target, image, look) : await processInChunks(image, look);
+        result = target ? await processInWorker(target, image, look, seed) : await processInChunks(image, look, seed);
     } catch {
-        result = await processInChunks(image, look);
+        result = await processInChunks(image, look, seed);
     }
 
     context.putImageData(result, 0, 0);

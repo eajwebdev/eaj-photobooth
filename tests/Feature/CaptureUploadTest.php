@@ -146,3 +146,12 @@ it('accepts a GIF boomerang from browsers that cannot record video', function ()
     $response->assertCreated()->assertJsonPath('data.mime', 'image/gif');
     expect(Capture::query()->sole()->media_path)->toEndWith('.gif');
 });
+
+it('accepts a vintage boomerang recorded in the phone camera app', function () {
+    Storage::fake('public');
+
+    $response = $this->post('/api/captures', boomerangPayload(['look' => 'vintage', 'camera' => 'upload']), ['Accept' => 'application/json']);
+
+    $response->assertCreated()->assertJsonPath('data.camera', 'upload');
+    expect(Capture::query()->sole()->look)->toBe('vintage');
+});

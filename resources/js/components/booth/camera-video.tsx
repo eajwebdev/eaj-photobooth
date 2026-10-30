@@ -1,3 +1,4 @@
+import { LookLayers } from '@/components/booth/look-layers';
 import type { CameraFacing } from '@/hooks/use-camera';
 import type { Rect } from '@/lib/capture-geometry';
 import type { Look } from '@/lib/looks';
@@ -78,14 +79,7 @@ export const CameraVideo = memo(
                         className="absolute inset-0 size-full object-cover"
                         style={{ filter: look?.cssFilter, transform: facing === 'user' ? 'scaleX(-1)' : undefined }}
                     />
-                    {look?.overlay && <div aria-hidden="true" className="pointer-events-none absolute inset-0" style={look.overlay} />}
-                    {look && look.vignette > 0 && (
-                        <div
-                            aria-hidden="true"
-                            className="pointer-events-none absolute inset-0"
-                            style={{ background: `radial-gradient(ellipse at center, transparent 55%, rgb(0 0 0 / ${look.vignette}) 100%)` }}
-                        />
-                    )}
+                    {look && <LookLayers look={look} />}
                 </div>
             </div>
         );

@@ -18,6 +18,14 @@ class Capture extends Model
     /** @use HasFactory<CaptureFactory> */
     use HasFactory;
 
+    public const DRIVE_BACKUP_PENDING = 'pending';
+
+    public const DRIVE_BACKUP_PROCESSING = 'processing';
+
+    public const DRIVE_BACKUP_COMPLETE = 'complete';
+
+    public const DRIVE_BACKUP_FAILED = 'failed';
+
     /**
      * @var list<string>
      */
@@ -27,6 +35,7 @@ class Capture extends Model
         'mime', 'width', 'height', 'duration_ms', 'size_bytes',
         'guest_name', 'message', 'signature_path', 'camera', 'station', 'device', 'ip',
         'is_hidden', 'group_tag', 'table_no', 'challenge_id', 'is_couple_favourite',
+        'drive_backup_status', 'drive_folder_id', 'drive_backed_up_at', 'drive_backup_error',
     ];
 
     /**
@@ -46,6 +55,7 @@ class Capture extends Model
             'downloads' => 'integer',
             'hearts_count' => 'integer',
             'table_no' => 'integer',
+            'drive_backed_up_at' => 'datetime',
         ];
     }
 

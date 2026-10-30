@@ -5,10 +5,12 @@ import { useIdle } from '@/hooks/use-idle';
 import { useObjectUrls } from '@/hooks/use-object-urls';
 import { useUploadQueue } from '@/hooks/use-upload-queue';
 import { albumUrl, type AlbumSession } from '@/lib/album-session';
+import { canShareFile, keepsakeFileName } from '@/lib/download';
 import type { SharedData } from '@/types';
 import { usePage } from '@inertiajs/react';
+import { Download, Share } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 export const DONE_IDLE_MS = 90_000;
 
@@ -35,6 +37,21 @@ export function DoneScreen({ preview, captureId, guestName, album, onMore, onDon
     const { isIdle, activity } = useIdle(DONE_IDLE_MS);
     const [url] = useObjectUrls(useMemo(() => [preview], [preview]));
     const name = guestName.trim();
+    const isVideo = preview.type.startsWith('video/') || preview.type === 'image/gif';
+    const fileName = useMemo(() => keepsakeFileName(photobooth.download_prefix, preview.type), [photobooth.download_prefix, preview.type]);
+    const file = useMemo(() => new File([preview], fileName, { type: preview.type }), [fileName, preview]);
+    const canShare = useMemo(() => canShareFile(file), [file]);
+    const [shareFailed, setShareFailed] = useState(false);
+
+    const share = async () => {
+        setShareFailed(false);
+
+        try {
+            await navigator.share({ files: [file], title: photobooth.couple.short });
+        } catch (error) {
+            setShareFailed(!(error instanceof DOMException && error.name === 'AbortError'));
+        }
+    };
 
     useEffect(() => {
         if (isIdle) {
@@ -129,10 +146,34 @@ export function DoneScreen({ preview, captureId, guestName, album, onMore, onDon
                 )}
 
                 <div className="mt-2 flex w-full flex-col gap-3">
-                    <GoldButton size="lg" onClick={onMore}>
-                        Take more photos
-                    </GoldButton>
-                    <GhostButton onClick={onDone}>I’m done</GhostButton>
+                    <div className="flex gap-3">
+                        {url && (
+                            <GoldButton asChild size="lg" className="flex-1">
+                                <a href={url} download={fileName}>
+                                    <Download className="size-5" strokeWidth={2} />
+                                    {isVideo ? 'Download boomerang' : 'Download photo'}
+                                </a>
+                            </GoldButton>
+                        )}
+                        {canShare && (
+                            <GhostButton size="lg" className="px-5" onClick={() => void share()} aria-label="Share or save to Photos">
+                                <Share className="size-5" strokeWidth={1.75} />
+                            </GhostButton>
+                        )}
+                    </div>
+                    {shareFailed && (
+                        <p role="alert" className="text-sm text-[#f0b3aa]">
+                            Sharing did not work. Use Download instead.
+                        </p>
+                    )}
+                    <GhostButton onClick={onMore}>Take more photos</GhostButton>
+                    <button
+                        type="button"
+                        onClick={onDone}
+                        className="text-mist/75 hover:text-mist min-h-12 text-sm underline-offset-4 hover:underline"
+                    >
+                        I’m done
+                    </button>
                 </div>
             </div>
 

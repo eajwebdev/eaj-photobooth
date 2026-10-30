@@ -54,7 +54,7 @@ export function FramePicker({ layouts, onPick }: FramePickerProps) {
                 <div
                     role="tablist"
                     aria-label="Frame styles"
-                    className="-mx-1 flex justify-center gap-1.5 overflow-x-auto px-1 py-3 [scrollbar-width:none]"
+                    className="-mx-4 flex gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:none] sm:justify-center"
                 >
                     {tabs.map((category) => (
                         <button
@@ -64,8 +64,8 @@ export function FramePicker({ layouts, onPick }: FramePickerProps) {
                             aria-selected={tab === category.value}
                             onClick={() => choose(category.value)}
                             className={cn(
-                                'min-h-12 shrink-0 rounded-full px-5 text-base transition-colors duration-200',
-                                tab === category.value ? 'bg-gold-light/15 text-gold-light ring-gold/70 ring-1' : 'text-mist/70 hover:text-mist',
+                                'min-h-10 shrink-0 rounded-full px-4 text-sm whitespace-nowrap transition-colors duration-200 sm:min-h-12 sm:px-5 sm:text-base',
+                                tab === category.value ? 'bg-mist text-navy font-medium' : 'text-mist/80 bg-white/8 hover:bg-white/12',
                             )}
                         >
                             {category.label}
@@ -75,7 +75,7 @@ export function FramePicker({ layouts, onPick }: FramePickerProps) {
             )}
 
             <div className="-mx-4 min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-2 pb-6">
-                <ul className="mx-auto grid max-w-7xl grid-cols-2 gap-x-4 gap-y-7 sm:grid-cols-3 sm:gap-x-6 lg:grid-cols-5">
+                <ul className="mx-auto grid max-w-7xl grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 sm:gap-x-6 lg:grid-cols-5">
                     {visible.map((layout) => (
                         <li key={layout.slug}>
                             <motion.button

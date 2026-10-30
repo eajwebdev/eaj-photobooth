@@ -2,6 +2,7 @@ import { useBoothCamera } from '@/components/booth/camera-context';
 import { CameraVideo } from '@/components/booth/camera-video';
 import { framePreviewId } from '@/components/booth/frame-picker';
 import { LayoutPreview } from '@/components/booth/layout-preview';
+import { LookChips } from '@/components/booth/look-strip';
 import { GhostButton } from '@/components/chapel/gold-button';
 import { IconButton } from '@/components/chapel/icon-button';
 import { unlockAudio } from '@/lib/audio';
@@ -24,6 +25,7 @@ const FRONT_FLASH_LEAD_MS = 250;
 const FRONT_FLASH_MIN_MS = 300;
 const TOP_BAR = 84;
 const BOTTOM_BAR = 176;
+const LOOK_CHIPS_BAR = 48;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
@@ -31,6 +33,9 @@ interface CaptureScreenProps {
     /** The collage frame; null when recording a boomerang. */
     layout: Layout | null;
     look: LookSlug;
+    /** Looks the guest can swipe through on the live preview; none (or one) hides the row. */
+    looks?: LookSlug[];
+    onLookChange?: (look: LookSlug) => void;
     /** Object URLs of shots already taken, by slot. */
     shotUrls: (string | null)[];
     /** Retake just this slot, then finish. */
@@ -62,6 +67,8 @@ interface Flight {
 export function CaptureScreen({
     layout,
     look,
+    looks = [],
+    onLookChange,
     shotUrls,
     retakeIndex,
     onShot,
@@ -107,6 +114,7 @@ export function CaptureScreen({
     const slot = layout ? (layout.slots[activeIndex] ?? layout.slots[0]) : null;
     const aspect = slot ? slot.w / slot.h : boomerangAspect(boomerangFrame);
     const lookDef = lookFor(look);
+    const showLookChips = looks.length > 1 && onLookChange !== undefined;
 
     useLayoutEffect(() => {
         const element = containerRef.current;
@@ -133,10 +141,11 @@ export function CaptureScreen({
             return null;
         }
 
-        const safe: Rect = { x: 16, y: TOP_BAR, w: screen.w - 32, h: Math.max(120, screen.h - TOP_BAR - BOTTOM_BAR) };
+        const bottom = BOTTOM_BAR + (showLookChips ? LOOK_CHIPS_BAR : 0);
+        const safe: Rect = { x: 16, y: TOP_BAR, w: screen.w - 32, h: Math.max(120, screen.h - TOP_BAR - bottom) };
 
         return layoutGuide(screen, videoSize, aspect, safe);
-    }, [aspect, screen, videoSize]);
+    }, [aspect, screen, showLookChips, videoSize]);
 
     const onVideoSize = useCallback((size: Size) => setVideoSize((current) => (current?.w === size.w && current?.h === size.h ? current : size)), []);
 
@@ -423,6 +432,11 @@ export function CaptureScreen({
                     <p role="alert" className="frosted text-mist rounded-full px-5 py-2 text-sm">
                         {captureError}
                     </p>
+                )}
+                {showLookChips && (
+                    <div className={cn('w-full transition-opacity', running && 'pointer-events-none opacity-0')} aria-hidden={running}>
+                        <LookChips looks={looks} selected={look} onSelect={onLookChange!} />
+                    </div>
                 )}
                 <p className={cn('text-mist/85 text-sm transition-opacity', running && 'opacity-0')}>{hint}</p>
                 <Shutter

@@ -20,6 +20,7 @@ interface Stats {
     albums: number;
     downloads: number;
     pending_derivatives: number;
+    drive_backup: { enabled: boolean; complete: number; pending: number; failed: number; not_queued: number };
     stations: StationRow[];
 }
 
@@ -95,6 +96,20 @@ export function OverviewPanel({ onLocked }: { onLocked: () => void }) {
                     {stats.pending_derivatives} photos are still being prepared for the gallery. If this number does not go down, check that the queue
                     worker is running.
                 </p>
+            )}
+
+            {stats?.drive_backup.enabled && (
+                <section className="border-gold-light/20 flex flex-col gap-2 rounded-2xl border p-5">
+                    <h2 className="font-display text-gold-light text-xl italic">Google Drive backup</h2>
+                    <p className="text-mist/80 text-sm">
+                        {stats.drive_backup.complete.toLocaleString()} backed up, {stats.drive_backup.pending.toLocaleString()} waiting
+                        {stats.drive_backup.failed > 0 ? `, ${stats.drive_backup.failed.toLocaleString()} failed` : ''}
+                        {stats.drive_backup.not_queued > 0 ? `, ${stats.drive_backup.not_queued.toLocaleString()} not queued` : ''}.
+                    </p>
+                    {(stats.drive_backup.pending > 0 || stats.drive_backup.failed > 0) && (
+                        <p className="text-mist/60 text-xs">The separate backups queue worker must be running.</p>
+                    )}
+                </section>
             )}
 
             <section className="flex flex-col gap-4">

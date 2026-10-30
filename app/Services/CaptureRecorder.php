@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\CameraSide;
 use App\Enums\CaptureType;
 use App\Http\Requests\StoreCaptureRequest;
+use App\Jobs\BackupCaptureToGoogleDrive;
 use App\Jobs\GenerateCaptureDerivatives;
 use App\Models\Album;
 use App\Models\Capture;
@@ -121,6 +122,14 @@ class CaptureRecorder
         }
 
         GenerateCaptureDerivatives::dispatch($capture);
+
+        if (config('services.google_drive.backup_enabled')) {
+            $capture->update([
+                'drive_backup_status' => Capture::DRIVE_BACKUP_PENDING,
+                'drive_backup_error' => null,
+            ]);
+            BackupCaptureToGoogleDrive::dispatch($capture);
+        }
 
         return ['capture' => $capture, 'created' => true];
     }

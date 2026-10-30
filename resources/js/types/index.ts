@@ -31,7 +31,23 @@ export interface SharedData {
 
 export type CaptureMode = 'collage' | 'boomerang';
 
-export type LookSlug = 'classic' | 'ivory' | 'noir' | 'royal';
+export type LookSlug =
+    | 'classic'
+    | 'ivory'
+    | 'golden'
+    | 'blush'
+    | 'royal'
+    | 'vintage'
+    | 'instant'
+    | 'seventies'
+    | 'heirloom'
+    | 'retro'
+    | 'noir'
+    | 'silver'
+    | 'vivid'
+    | 'lomo'
+    | 'dreamy'
+    | 'moody';
 
 export type PartyModule = 'stickers' | 'who_are_you' | 'challenges' | 'hearts' | 'quiz' | 'mosaic' | 'backdrops';
 

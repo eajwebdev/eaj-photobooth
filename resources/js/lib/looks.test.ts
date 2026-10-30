@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyLookToPixels, LOOKS, matrixFor } from './looks';
+import { applyLookToPixels, LOOK_SLUGS, LOOKS, matrixFor } from './looks';
 
 function pixel(r: number, g: number, b: number): Uint8ClampedArray {
     return new Uint8ClampedArray([r, g, b, 255]);
@@ -68,5 +68,64 @@ describe('vignette', () => {
 
         expect(at(10, 10)).toBe(200);
         expect(at(0, 0)).toBeLessThan(150);
+    });
+});
+
+describe('the look list', () => {
+    it('offers at least ten looks, with a vintage set', () => {
+        expect(LOOK_SLUGS.length).toBeGreaterThanOrEqual(10);
+        expect(LOOK_SLUGS.filter((slug) => LOOKS[slug].group === 'vintage').length).toBeGreaterThanOrEqual(4);
+    });
+
+    it('keeps fade out of the CSS filter (it is shown as a layer instead)', () => {
+        expect(LOOKS.silver.cssFilter).toBe('grayscale(1) contrast(0.95)');
+        expect(LOOKS.silver.overlays.some((layer) => layer.mixBlendMode === 'lighten')).toBe(true);
+    });
+});
+
+describe('fade', () => {
+    it('lifts black to grey but keeps white white', () => {
+        const fade = matrixFor([{ op: 'fade', amount: 0.1 }]);
+
+        expect(apply(pixel(0, 0, 0), fade)).toEqual([26, 26, 26, 255]);
+        expect(apply(pixel(255, 255, 255), fade)).toEqual([255, 255, 255, 255]);
+    });
+});
+
+describe('light leak', () => {
+    it('brightens towards its corner and leaves the far corner untouched', () => {
+        const size = 20;
+        const data = new Uint8ClampedArray(size * size * 4).fill(100);
+        applyLookToPixels(data, size, size, {
+            matrix: matrixFor([]),
+            vignette: 0,
+            leak: { x: 1, y: 0, radius: 0.5, r: 255, g: 120, b: 60, strength: 0.5 },
+        });
+
+        const at = (x: number, y: number) => Array.from(data.slice((y * size + x) * 4, (y * size + x) * 4 + 3));
+
+        expect(at(19, 0)[0]).toBeGreaterThan(140);
+        expect(at(0, 19)).toEqual([100, 100, 100]);
+    });
+});
+
+describe('grain', () => {
+    const grainy = (seed: number) => {
+        const data = new Uint8ClampedArray(16 * 16 * 4).fill(128);
+        applyLookToPixels(data, 16, 16, { matrix: matrixFor([]), vignette: 0, grain: 0.5 }, 0, 16, seed);
+
+        return Array.from(data);
+    };
+
+    it('is the same every time for the same photo', () => {
+        expect(grainy(0)).toEqual(grainy(0));
+    });
+
+    it('changes with the seed, so boomerang frames flicker like film', () => {
+        expect(grainy(1)).not.toEqual(grainy(0));
+    });
+
+    it('stays subtle', () => {
+        expect(Math.max(...grainy(0).map((value) => Math.abs(value - 128)))).toBeLessThanOrEqual(22);
     });
 });

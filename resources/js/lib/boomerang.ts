@@ -102,6 +102,21 @@ export function clipDurationMs(sequenceLength: number, fps = PLAYBACK_FPS, loops
     return Math.round(((sequenceLength * loops) / fps) * 1000);
 }
 
+/** The shortest recorded video a boomerang can be made from. */
+export const MIN_RECORDED_MS = 300;
+
+/**
+ * When to grab each frame from a video recorded in the phone's camera app: a
+ * BURST_MS window from the middle (away from the shaky start and stop taps),
+ * or the whole video when it is shorter than that.
+ */
+export function recordedSchedule(durationMs: number, count = BURST_FRAMES, windowMs = BURST_MS): number[] {
+    const span = Math.min(windowMs, durationMs);
+    const start = (durationMs - span) / 2;
+
+    return Array.from({ length: count }, (_, index) => Math.round(start + (index * span) / count));
+}
+
 // ------------------------------------------------------------------ capturing
 
 const sleepUntil = (time: number) => new Promise<void>((resolve) => window.setTimeout(resolve, Math.max(0, time - performance.now())));
@@ -150,6 +165,121 @@ export async function captureBurst(
     return frames;
 }
 
+/** Resolves on `event`, rejects on the element's error event or after `timeoutMs`. */
+function waitForEvent(target: HTMLMediaElement, event: string, timeoutMs: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const cleanup = () => {
+            window.clearTimeout(timer);
+            target.removeEventListener(event, onEvent);
+            target.removeEventListener('error', onError);
+        };
+        const onEvent = () => (cleanup(), resolve());
+        const onError = () => (cleanup(), reject(new Error('The video could not be opened.')));
+        const timer = window.setTimeout(() => (cleanup(), reject(new Error('The video took too long to open.'))), timeoutMs);
+
+        target.addEventListener(event, onEvent);
+        target.addEventListener('error', onError);
+    });
+}
+
+type VideoWithFrameCallback = HTMLVideoElement & { requestVideoFrameCallback?: (callback: () => void) => number };
+
+/** Seeks and waits until the new frame is actually painted, so drawImage never grabs a stale one. */
+async function seekTo(video: VideoWithFrameCallback, seconds: number): Promise<void> {
+    const seeked = waitForEvent(video, 'seeked', 5000);
+    video.currentTime = seconds;
+    await seeked;
+
+    if (typeof video.requestVideoFrameCallback === 'function') {
+        await Promise.race([new Promise<void>((resolve) => video.requestVideoFrameCallback!(() => resolve())), sleepUntil(performance.now() + 150)]);
+    }
+}
+
+/** Some recordings (WebM especially) report an Infinity duration until seeked to the end. */
+async function recordedLengthMs(video: HTMLVideoElement): Promise<number> {
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+        return video.duration * 1000;
+    }
+
+    try {
+        await seekTo(video, 1e7);
+    } catch {
+        // Fall through: the duration check below decides.
+    }
+
+    return Number.isFinite(video.duration) && video.duration > 0 ? video.duration * 1000 : BURST_MS;
+}
+
+/**
+ * Turns a short video from the phone's own camera app (the fallback when the
+ * live camera is blocked, e.g. on a plain http link) into burst frames, just
+ * like captureBurst: the centre crop of the frame's photo area, at most 720px.
+ */
+export async function burstFromRecording(
+    file: Blob,
+    onProgress?: (fraction: number) => void,
+    frame: BoomerangFrame = BOOMERANG_FRAME,
+): Promise<ImageBitmap[]> {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    // Kept in the document (but invisible) so iOS decodes its frames.
+    Object.assign(video.style, { position: 'fixed', left: '0', top: '0', width: '2px', height: '2px', opacity: '0.01', pointerEvents: 'none' });
+    document.body.appendChild(video);
+
+    const { w, h } = frame.photo;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d')!;
+    const frames: ImageBitmap[] = [];
+
+    try {
+        const loaded = waitForEvent(video, 'loadedmetadata', 15000);
+        video.src = url;
+        await loaded;
+
+        // iOS only decodes a frame once the video has played: start and stop it straight away.
+        await video.play().catch(() => undefined);
+        video.pause();
+
+        const durationMs = await recordedLengthMs(video);
+
+        if (!video.videoWidth || !video.videoHeight) {
+            throw new Error('The video has no picture.');
+        }
+
+        if (durationMs < MIN_RECORDED_MS) {
+            throw new Error('The video is too short.');
+        }
+
+        const crop = centerCrop({ w: video.videoWidth, h: video.videoHeight }, boomerangAspect(frame));
+
+        for (const time of recordedSchedule(durationMs)) {
+            await seekTo(video, time / 1000);
+            ctx.drawImage(video, crop.x, crop.y, crop.w, crop.h, 0, 0, w, h);
+            frames.push(await createImageBitmap(canvas));
+            onProgress?.(frames.length / BURST_FRAMES);
+        }
+
+        return frames;
+    } catch (error) {
+        frames.forEach((bitmap) => bitmap.close());
+
+        throw error;
+    } finally {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+        video.remove();
+        URL.revokeObjectURL(url);
+        canvas.width = 0;
+        canvas.height = 0;
+    }
+}
+
 // ------------------------------------------------------------------- framing
 
 function drawFrame(ctx: CanvasRenderingContext2D, photo: CanvasImageSource, brand: Brand, frame: BoomerangFrame): void {
@@ -192,7 +322,13 @@ function drawFrame(ctx: CanvasRenderingContext2D, photo: CanvasImageSource, bran
 }
 
 /** Applies the look to each burst frame and sets it in the branded frame. */
-async function brandFrames(frames: ImageBitmap[], look: LookSlug, brand: Brand, frame: BoomerangFrame, onProgress?: (fraction: number) => void): Promise<ImageBitmap[]> {
+async function brandFrames(
+    frames: ImageBitmap[],
+    look: LookSlug,
+    brand: Brand,
+    frame: BoomerangFrame,
+    onProgress?: (fraction: number) => void,
+): Promise<ImageBitmap[]> {
     await ensureCollageFonts();
 
     const { w, h, photo } = frame;
@@ -208,7 +344,7 @@ async function brandFrames(frames: ImageBitmap[], look: LookSlug, brand: Brand, 
 
     for (const [index, burstFrame] of frames.entries()) {
         photoCtx.drawImage(burstFrame, 0, 0, photo.w, photo.h);
-        await applyLook(photoCtx, photo.w, photo.h, look);
+        await applyLook(photoCtx, photo.w, photo.h, look, index);
         drawFrame(frameCtx, photoCanvas, brand, frame);
         branded.push(await createImageBitmap(frameCanvas));
         onProgress?.((index + 1) / frames.length);

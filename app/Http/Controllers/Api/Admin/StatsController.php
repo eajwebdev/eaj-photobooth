@@ -53,6 +53,16 @@ class StatsController extends Controller
                 'albums' => Album::query()->count(),
                 'downloads' => (int) Capture::query()->sum('downloads'),
                 'pending_derivatives' => Capture::query()->whereNull('thumb_path')->count(),
+                'drive_backup' => [
+                    'enabled' => (bool) config('services.google_drive.backup_enabled'),
+                    'complete' => Capture::query()->where('drive_backup_status', Capture::DRIVE_BACKUP_COMPLETE)->count(),
+                    'pending' => Capture::query()->whereIn('drive_backup_status', [
+                        Capture::DRIVE_BACKUP_PENDING,
+                        Capture::DRIVE_BACKUP_PROCESSING,
+                    ])->count(),
+                    'failed' => Capture::query()->where('drive_backup_status', Capture::DRIVE_BACKUP_FAILED)->count(),
+                    'not_queued' => Capture::query()->whereNull('drive_backup_status')->count(),
+                ],
                 'stations' => $byStation->values(),
             ],
         ]);

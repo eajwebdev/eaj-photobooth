@@ -1,0 +1,64 @@
+<?php
+
+namespace App\Console\Commands;
+
+use App\Jobs\BackupCaptureToGoogleDrive;
+use App\Models\Capture;
+use App\Services\GoogleDriveBackup;
+use Illuminate\Console\Command;
+
+class QueueGoogleDriveBackups extends Command
+{
+    /**
+     * The name and signature of the console command.
+     *
+     * @var string
+     */
+    protected $signature = 'photobooth:drive-backup
+                            {--force : Queue captures that are already marked complete}';
+
+    /**
+     * The console command description.
+     *
+     * @var string
+     */
+    protected $description = 'Queue local captures for backup to the configured Google Drive folder';
+
+    /**
+     * Execute the console command.
+     */
+    public function handle(GoogleDriveBackup $drive): int
+    {
+        if (! $drive->configured()) {
+            $this->error('Google Drive backup is disabled or its OAuth credentials and folder ID are incomplete.');
+
+            return self::FAILURE;
+        }
+
+        $query = Capture::query()->orderBy('id');
+
+        if (! $this->option('force')) {
+            $query->where(function ($pending): void {
+                $pending->whereNull('drive_backup_status')
+                    ->orWhere('drive_backup_status', '!=', Capture::DRIVE_BACKUP_COMPLETE);
+            });
+        }
+
+        $queued = 0;
+
+        $query->chunkById(100, function ($captures) use (&$queued): void {
+            foreach ($captures as $capture) {
+                $capture->update([
+                    'drive_backup_status' => Capture::DRIVE_BACKUP_PENDING,
+                    'drive_backup_error' => null,
+                ]);
+                BackupCaptureToGoogleDrive::dispatch($capture);
+                $queued++;
+            }
+        });
+
+        $this->info("Queued {$queued} capture(s) on the backups queue.");
+
+        return self::SUCCESS;
+    }
+}

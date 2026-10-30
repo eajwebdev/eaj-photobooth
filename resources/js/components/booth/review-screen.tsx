@@ -1,5 +1,6 @@
 import { GuestFields, type GuestDetails } from '@/components/booth/guest-fields';
 import { LayoutPreview } from '@/components/booth/layout-preview';
+import { LookStrip } from '@/components/booth/look-strip';
 import { StickerStudio } from '@/components/booth/sticker-studio';
 import { GhostButton, GoldButton } from '@/components/chapel/gold-button';
 import { useObjectUrls } from '@/hooks/use-object-urls';
@@ -14,6 +15,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 const TEXT_RECOMPOSE_DELAY_MS = 450;
+const LOOK_RECOMPOSE_DELAY_MS = 220;
 
 export type { GuestDetails } from '@/components/booth/guest-fields';
 
@@ -21,6 +23,9 @@ interface ReviewScreenProps {
     layout: Layout;
     look: LookSlug;
     shots: (Blob | null)[];
+    /** The looks a guest can switch between here; none (or one) hides the filter strip. */
+    looks?: LookSlug[];
+    onLookChange?: (look: LookSlug) => void;
     details: GuestDetails;
     onDetailsChange: (details: GuestDetails) => void;
     onRetake: (index: number) => void;
@@ -35,7 +40,20 @@ interface ReviewScreenProps {
  * The review: the finished collage, large, with each photo retakeable, and
  * the guest's name, wish and guestbook signature (all optional).
  */
-export function ReviewScreen({ layout, look, shots, details, onDetailsChange, onRetake, onStartOver, onSave, saving, saveError }: ReviewScreenProps) {
+export function ReviewScreen({
+    layout,
+    look,
+    shots,
+    looks = [],
+    onLookChange,
+    details,
+    onDetailsChange,
+    onRetake,
+    onStartOver,
+    onSave,
+    saving,
+    saveError,
+}: ReviewScreenProps) {
     const { photobooth } = usePage<SharedData>().props;
     const brand = useMemo(() => brandFrom(photobooth), [photobooth]);
     const shotUrls = useObjectUrls(shots);
@@ -59,6 +77,15 @@ export function ReviewScreen({ layout, look, shots, details, onDetailsChange, on
     // Name and wish only change the picture on the magazine and wish card frames.
     const [textForCollage, setTextForCollage] = useState({ guestName: details.guestName, wish: details.wish });
 
+    // Tapping through looks quickly only recomposes for the one the guest stops on.
+    const [lookForCollage, setLookForCollage] = useState(look);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => setLookForCollage(look), LOOK_RECOMPOSE_DELAY_MS);
+
+        return () => window.clearTimeout(timer);
+    }, [look]);
+
     useEffect(() => {
         if (!usesText) {
             return;
@@ -70,12 +97,12 @@ export function ReviewScreen({ layout, look, shots, details, onDetailsChange, on
     }, [details.guestName, details.wish, usesText]);
 
     const compose = useCallback(
-        (text: { guestName: string; wish: string }) => {
+        (text: { guestName: string; wish: string }, lookToUse: LookSlug) => {
             const job = ++latestJob.current;
             setComposing(true);
             setComposeError(false);
 
-            const promise = composeCollage({ layout, shots, look, brand, guestName: text.guestName, wish: text.wish })
+            const promise = composeCollage({ layout, shots, look: lookToUse, brand, guestName: text.guestName, wish: text.wish })
                 .then((blob) => {
                     if (job === latestJob.current) {
                         setCollage(blob);
@@ -97,12 +124,12 @@ export function ReviewScreen({ layout, look, shots, details, onDetailsChange, on
 
             return promise;
         },
-        [brand, layout, look, shots],
+        [brand, layout, shots],
     );
 
     useEffect(() => {
-        void compose(textForCollage);
-    }, [compose, textForCollage]);
+        void compose(textForCollage, lookForCollage);
+    }, [compose, lookForCollage, textForCollage]);
 
     // Paint the stickers onto the latest collage (full resolution).
     useEffect(() => {
@@ -132,8 +159,9 @@ export function ReviewScreen({ layout, look, shots, details, onDetailsChange, on
 
         // Always save a collage that includes the latest name and wish.
         const text = { guestName: details.guestName, wish: overrideWish ?? details.wish };
-        const needsFresh = usesText && (text.guestName !== textForCollage.guestName || text.wish !== textForCollage.wish);
-        const finished = needsFresh ? await compose(text) : ((await composeJob.current) ?? collage);
+        const needsFresh =
+            look !== lookForCollage || (usesText && (text.guestName !== textForCollage.guestName || text.wish !== textForCollage.wish));
+        const finished = needsFresh ? await compose(text, look) : ((await composeJob.current) ?? collage);
 
         if (finished) {
             await onSave(stickers.length > 0 ? await applyStickers(finished, stickers) : finished);
@@ -143,10 +171,10 @@ export function ReviewScreen({ layout, look, shots, details, onDetailsChange, on
     const aspect = layout.canvas.w / layout.canvas.h;
 
     return (
-        <div className="flex min-h-0 flex-1 flex-col items-center gap-6 overflow-y-auto overscroll-contain pt-2 pb-6 landscape:flex-row landscape:items-start landscape:justify-center landscape:gap-10 landscape:overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col items-center gap-5 overflow-y-auto overscroll-contain pt-2 landscape:flex-row landscape:items-start landscape:justify-center landscape:gap-10 landscape:overflow-hidden">
             {/* The collage */}
             <div
-                className="relative w-[min(84vw,30rem,calc(46dvh*var(--aspect)))] shrink-0 drop-shadow-[0_18px_40px_rgb(0_0_0/0.45)] landscape:w-[min(48vw,calc((100dvh-9rem)*var(--aspect)))] landscape:self-center"
+                className="relative w-[min(84vw,30rem,calc(44dvh*var(--aspect)))] shrink-0 drop-shadow-[0_18px_40px_rgb(0_0_0/0.45)] landscape:w-[min(48vw,calc((100dvh-9rem)*var(--aspect)))] landscape:self-center"
                 style={{ '--aspect': aspect } as CSSProperties}
             >
                 <div style={{ aspectRatio: `${layout.canvas.w} / ${layout.canvas.h}` }} className="relative w-full">
@@ -164,7 +192,7 @@ export function ReviewScreen({ layout, look, shots, details, onDetailsChange, on
                 {composeError && (
                     <p role="alert" className="text-mist/80 mt-3 text-center text-sm">
                         The collage could not be finished.{' '}
-                        <button type="button" className="text-gold-light underline" onClick={() => void compose(textForCollage)}>
+                        <button type="button" className="text-gold-light underline" onClick={() => void compose(textForCollage, lookForCollage)}>
                             Try again
                         </button>
                     </p>
@@ -172,7 +200,16 @@ export function ReviewScreen({ layout, look, shots, details, onDetailsChange, on
             </div>
 
             {/* Details panel */}
-            <div className="flex w-full max-w-md flex-col gap-6 landscape:max-h-full landscape:overflow-y-auto landscape:pr-1 landscape:pb-6">
+            <div className="flex w-full max-w-md flex-col gap-6 landscape:max-h-full landscape:overflow-y-auto landscape:pr-1">
+                {looks.length > 1 && onLookChange && (
+                    <section aria-labelledby="review-filter" className="flex flex-col gap-2.5">
+                        <h2 id="review-filter" className="text-mist/90 text-sm font-medium">
+                            Filter
+                        </h2>
+                        <LookStrip looks={looks} selected={look} onSelect={onLookChange} sampleUrl={shotUrls[0]} disabled={saving} />
+                    </section>
+                )}
+
                 <ul className="flex flex-wrap justify-center gap-3" aria-label="Your photos">
                     {shotUrls.map((url, index) => (
                         <li key={index}>
@@ -208,71 +245,74 @@ export function ReviewScreen({ layout, look, shots, details, onDetailsChange, on
                     </p>
                 )}
 
-                <AnimatePresence initial={false} mode="wait">
-                    {askingWish ? (
-                        <motion.div
-                            key="wish"
-                            role="alertdialog"
-                            aria-label="Add a wish"
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                            className="border-gold-light/25 bg-navy-2/70 flex flex-col gap-3 rounded-2xl border p-5 text-center"
-                        >
-                            <p className="text-mist">This frame prints your wish. Would you like to write one?</p>
-                            <div className="flex gap-3">
-                                <GhostButton type="button" className="flex-1" onClick={() => void save('With love')}>
-                                    Skip
-                                </GhostButton>
-                                <GoldButton
-                                    type="button"
-                                    className="flex-1"
-                                    onClick={() => {
-                                        setAskingWish(false);
-                                        document.getElementById(wishId)?.focus();
-                                    }}
-                                >
-                                    Write a wish
+                {/* The main actions stay under the thumb on phones while the guest scrolls the details. */}
+                <div className="from-navy via-navy/95 sticky bottom-0 z-10 -mx-4 mt-auto bg-gradient-to-t to-transparent px-4 pt-6 pb-3">
+                    <AnimatePresence initial={false} mode="wait">
+                        {askingWish ? (
+                            <motion.div
+                                key="wish"
+                                role="alertdialog"
+                                aria-label="Add a wish"
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0 }}
+                                className="border-gold-light/25 bg-navy-2/70 flex flex-col gap-3 rounded-2xl border p-5 text-center"
+                            >
+                                <p className="text-mist">This frame prints your wish. Would you like to write one?</p>
+                                <div className="flex gap-3">
+                                    <GhostButton type="button" className="flex-1" onClick={() => void save('With love')}>
+                                        Skip
+                                    </GhostButton>
+                                    <GoldButton
+                                        type="button"
+                                        className="flex-1"
+                                        onClick={() => {
+                                            setAskingWish(false);
+                                            document.getElementById(wishId)?.focus();
+                                        }}
+                                    >
+                                        Write a wish
+                                    </GoldButton>
+                                </div>
+                            </motion.div>
+                        ) : confirmingStartOver ? (
+                            <motion.div
+                                key="restart"
+                                role="alertdialog"
+                                aria-label="Start over?"
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0 }}
+                                className="border-gold-light/25 bg-navy-2/70 flex flex-col gap-3 rounded-2xl border p-5 text-center"
+                            >
+                                <p className="text-mist">Start over? These photos will be removed.</p>
+                                <div className="flex gap-3">
+                                    <GhostButton type="button" className="flex-1" onClick={() => setConfirmingStartOver(false)}>
+                                        Keep them
+                                    </GhostButton>
+                                    <GoldButton type="button" className="flex-1" onClick={onStartOver}>
+                                        Start over
+                                    </GoldButton>
+                                </div>
+                            </motion.div>
+                        ) : (
+                            <motion.div
+                                key="actions"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="flex flex-col gap-3"
+                            >
+                                <GoldButton type="button" size="lg" onClick={() => void save()} disabled={saving || composeError}>
+                                    {saving ? 'Saving…' : 'Save collage'}
                                 </GoldButton>
-                            </div>
-                        </motion.div>
-                    ) : confirmingStartOver ? (
-                        <motion.div
-                            key="restart"
-                            role="alertdialog"
-                            aria-label="Start over?"
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                            className="border-gold-light/25 bg-navy-2/70 flex flex-col gap-3 rounded-2xl border p-5 text-center"
-                        >
-                            <p className="text-mist">Start over? These photos will be removed.</p>
-                            <div className="flex gap-3">
-                                <GhostButton type="button" className="flex-1" onClick={() => setConfirmingStartOver(false)}>
-                                    Keep them
-                                </GhostButton>
-                                <GoldButton type="button" className="flex-1" onClick={onStartOver}>
+                                <GhostButton type="button" onClick={() => setConfirmingStartOver(true)} disabled={saving}>
                                     Start over
-                                </GoldButton>
-                            </div>
-                        </motion.div>
-                    ) : (
-                        <motion.div
-                            key="actions"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="flex flex-col gap-3"
-                        >
-                            <GoldButton type="button" size="lg" onClick={() => void save()} disabled={saving || composeError}>
-                                {saving ? 'Saving…' : 'Save collage'}
-                            </GoldButton>
-                            <GhostButton type="button" onClick={() => setConfirmingStartOver(true)} disabled={saving}>
-                                Start over
-                            </GhostButton>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                                </GhostButton>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
             </div>
             <StickerStudio
                 open={studioOpen}

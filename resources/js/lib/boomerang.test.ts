@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BOOMERANG_ASPECT, BOOMERANG_FRAME, burstSchedule, clipDurationMs, pickRecorderMime, pingPong } from './boomerang';
+import { BOOMERANG_ASPECT, BOOMERANG_FRAME, burstSchedule, clipDurationMs, pickRecorderMime, pingPong, recordedSchedule } from './boomerang';
 
 describe('pingPong', () => {
     it('plays forwards then back without doubling the end frames', () => {
@@ -23,6 +23,23 @@ describe('burstSchedule', () => {
         expect(times[0]).toBe(0);
         expect(times[23]).toBeLessThan(1500);
         expect(times[1]).toBe(63);
+    });
+});
+
+describe('recordedSchedule', () => {
+    it('takes a 1.5 second window from the middle of a longer recording', () => {
+        const times = recordedSchedule(4000);
+
+        expect(times).toHaveLength(24);
+        expect(times[0]).toBe(1250);
+        expect(times[23]).toBeLessThan(2750);
+    });
+
+    it('spreads the frames over the whole of a shorter recording', () => {
+        const times = recordedSchedule(800);
+
+        expect(times[0]).toBe(0);
+        expect(times[23]).toBeLessThan(800);
     });
 });
 

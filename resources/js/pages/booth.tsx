@@ -1,5 +1,6 @@
 import { BoomerangFramePicker } from '@/components/booth/boomerang-frame-picker';
 import { BoomerangReview } from '@/components/booth/boomerang-review';
+import { BoomerangUpload } from '@/components/booth/boomerang-upload';
 import { BoothHeader } from '@/components/booth/booth-header';
 import { CameraProvider, useBoothCamera } from '@/components/booth/camera-context';
 import { CaptureScreen } from '@/components/booth/capture-screen';
@@ -9,7 +10,6 @@ import { LookPicker } from '@/components/booth/look-picker';
 import { ModePicker } from '@/components/booth/mode-picker';
 import { ReviewScreen, type GuestDetails } from '@/components/booth/review-screen';
 import { UploadFallback } from '@/components/booth/upload-fallback';
-import { GhostButton } from '@/components/chapel/gold-button';
 import { KioskShell } from '@/components/chapel/kiosk-shell';
 import { useAlbum } from '@/hooks/use-album';
 import { useIdle } from '@/hooks/use-idle';
@@ -19,6 +19,7 @@ import { BOOMERANG_FRAMES, type BoomerangClip, type BoomerangFrame, type Boomera
 import { brandFrom } from '@/lib/brand';
 import { composeCollage } from '@/lib/compose';
 import type { Layout } from '@/lib/layouts';
+import { LOOK_SLUGS, lookFor } from '@/lib/looks';
 import { fetchChallenges, type Challenge } from '@/lib/party';
 import { clearSession, loadSession, newSessionId, saveSession, type BoothSession, type ShotSource } from '@/lib/session-store';
 import { getStation } from '@/lib/station';
@@ -66,12 +67,16 @@ function BoothFlow({ layouts }: BoothProps) {
     const { isIdle } = useIdle(IDLE_RETURN_MS);
 
     const modes = useMemo<CaptureMode[]>(() => (photobooth.modes.length > 0 ? photobooth.modes : ['collage']), [photobooth.modes]);
-    const looks = useMemo<LookSlug[]>(
-        () => (photobooth.looks.length > 0 ? photobooth.looks : [photobooth.default_look]),
-        [photobooth.looks, photobooth.default_look],
-    );
+    // In picker order (natural, vintage, black & white, bold), whatever order the admin switched them on in.
+    const looks = useMemo<LookSlug[]>(() => {
+        const offered = LOOK_SLUGS.filter((slug) => photobooth.looks.includes(slug));
+
+        return offered.length > 0 ? offered : [lookFor(photobooth.default_look).slug];
+    }, [photobooth.looks, photobooth.default_look]);
     const defaultLook = looks.includes(photobooth.default_look) ? photobooth.default_look : looks[0];
     const askForLook = photobooth.look_picker_enabled && looks.length > 1;
+    /** The looks guests can also switch between on the camera and review screens. */
+    const lookChoices = askForLook ? looks : [];
 
     // The mode screen also holds the challenge deck, so it shows when challenges are on.
     const showModeStep = modes.length > 1 || photobooth.modules.challenges;
@@ -170,6 +175,16 @@ function BoothFlow({ layouts }: BoothProps) {
         }
     }, []);
 
+    /** A new look from the camera or review screen: kept with the session, so a reload keeps it too. */
+    const changeLook = useCallback((next: LookSlug) => {
+        setLook(next);
+
+        if (session.current) {
+            session.current = { ...session.current, look: next };
+            void saveSession(session.current);
+        }
+    }, []);
+
     /** Saves to this device's upload queue first; the queue sends it when it can. */
     const queueCollage = useCallback(
         async (collage: Blob, guest: GuestDetails) => {
@@ -248,14 +263,9 @@ function BoothFlow({ layouts }: BoothProps) {
         [boomerangFrame, challenge, look],
     );
 
-    /** The clip is ready: keep it in the session store so a reload does not lose it. */
+    /** The clip is ready: keep it in the session store so a reload does not lose it. The burst stays, for remaking it in another look. */
     const handleBuilt = useCallback((built: BoomerangClip) => {
         setClip(built);
-        setBurst((frames) => {
-            frames?.forEach((frame) => frame.close());
-
-            return null;
-        });
 
         if (session.current) {
             session.current = { ...session.current, boomerang: built };
@@ -304,6 +314,11 @@ function BoothFlow({ layouts }: BoothProps) {
 
             if (captureId) {
                 setDone({ preview: finished.clip, captureId });
+                setBurst((frames) => {
+                    frames?.forEach((frame) => frame.close());
+
+                    return null;
+                });
                 setStep('done');
             }
         } catch {
@@ -484,6 +499,8 @@ function BoothFlow({ layouts }: BoothProps) {
                                 <CaptureScreen
                                     layout={layout}
                                     look={look}
+                                    looks={lookChoices}
+                                    onLookChange={changeLook}
                                     shotUrls={shotUrls}
                                     retakeIndex={retakeIndex}
                                     onShot={storeShot}
@@ -499,6 +516,8 @@ function BoothFlow({ layouts }: BoothProps) {
                                 <CaptureScreen
                                     layout={null}
                                     look={look}
+                                    looks={lookChoices}
+                                    onLookChange={changeLook}
                                     shotUrls={[]}
                                     retakeIndex={null}
                                     onShot={async () => undefined}
@@ -561,7 +580,7 @@ function BoothFlow({ layouts }: BoothProps) {
                             {step === 'look' && (
                                 <>
                                     {header(TITLES.look)}
-                                    <LookPicker looks={looks} selected={look} onSelect={setLook} onContinue={() => goNext('look')} />
+                                    <LookPicker looks={looks} selected={look} onSelect={changeLook} onContinue={() => goNext('look')} />
                                 </>
                             )}
 
@@ -585,23 +604,7 @@ function BoothFlow({ layouts }: BoothProps) {
                             {step === 'camera' && mode === 'boomerang' && (
                                 <>
                                     {header(TITLES.boomerang)}
-                                    <div className="flex flex-1 flex-col items-center justify-center gap-5 text-center">
-                                        <p className="text-mist max-w-sm">
-                                            {camera.error?.message ?? 'The live camera is not available on this device.'} Boomerangs need the live
-                                            camera.
-                                        </p>
-                                        {modes.includes('collage') && (
-                                            <GhostButton
-                                                type="button"
-                                                onClick={() => {
-                                                    setMode('collage');
-                                                    setStep('frame');
-                                                }}
-                                            >
-                                                Make a photo collage instead
-                                            </GhostButton>
-                                        )}
-                                    </div>
+                                    <BoomerangUpload frame={boomerangFrame} reason={camera.error?.message ?? null} onBurst={handleBurst} />
                                 </>
                             )}
 
@@ -615,6 +618,8 @@ function BoothFlow({ layouts }: BoothProps) {
                                         frames={burst}
                                         clip={clip}
                                         look={look}
+                                        looks={lookChoices}
+                                        onLookChange={changeLook}
                                         details={details}
                                         onDetailsChange={changeDetails}
                                         onBuilt={handleBuilt}
@@ -634,6 +639,8 @@ function BoothFlow({ layouts }: BoothProps) {
                                     <ReviewScreen
                                         layout={layout}
                                         look={look}
+                                        looks={lookChoices}
+                                        onLookChange={changeLook}
                                         shots={shots}
                                         details={details}
                                         onDetailsChange={changeDetails}

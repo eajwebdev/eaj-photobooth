@@ -8,12 +8,13 @@ interface LookJob {
     width: number;
     height: number;
     look: LookSlug;
+    seed?: number;
 }
 
-/** Applies a look's colour matrix and vignette off the main thread. */
+/** Applies a look (colour matrix, light leak, vignette and grain) off the main thread. */
 self.onmessage = (event: MessageEvent<LookJob>) => {
-    const { id, buffer, width, height, look } = event.data;
+    const { id, buffer, width, height, look, seed = 0 } = event.data;
 
-    applyLookToPixels(new Uint8ClampedArray(buffer), width, height, lookFor(look));
+    applyLookToPixels(new Uint8ClampedArray(buffer), width, height, lookFor(look), 0, height, seed);
     (self as unknown as DedicatedWorkerGlobalScope).postMessage({ id, buffer }, [buffer]);
 };

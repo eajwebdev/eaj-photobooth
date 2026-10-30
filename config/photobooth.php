@@ -45,7 +45,11 @@ return [
 
     'modes' => ['collage', 'boomerang'],
 
-    'looks' => ['classic', 'ivory', 'noir', 'royal'],
+    'looks' => [
+        'classic', 'ivory', 'golden', 'blush', 'royal',
+        'vintage', 'instant', 'seventies', 'heirloom', 'retro',
+        'noir', 'silver', 'vivid', 'lomo', 'dreamy', 'moody',
+    ],
 
     'default_look' => 'classic',
 
