@@ -20,6 +20,8 @@ it('returns 401 for admin routes without the PIN', function (string $method, str
     'settings' => ['GET', '/api/admin/settings'],
     'settings update' => ['PUT', '/api/admin/settings'],
     'export' => ['POST', '/api/admin/exports'],
+    'drive check' => ['POST', '/api/admin/drive/check'],
+    'drive retry' => ['POST', '/api/admin/drive/retry'],
 ]);
 
 it('returns 401 for a wrong PIN', function () {

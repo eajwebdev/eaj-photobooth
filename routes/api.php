@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Admin\CaptureController as AdminCaptureController;
 use App\Http\Controllers\Api\Admin\ChallengeController as AdminChallengeController;
+use App\Http\Controllers\Api\Admin\DriveBackupController;
 use App\Http\Controllers\Api\Admin\LayoutController as AdminLayoutController;
 use App\Http\Controllers\Api\Admin\MosaicController;
 use App\Http\Controllers\Api\Admin\QuizController as AdminQuizController;
@@ -62,6 +63,8 @@ Route::middleware('throttle:uploads')->group(function () {
 Route::prefix('admin')->name('admin.')->middleware(['throttle:admin', 'pin:admin'])->group(function () {
     Route::post('session', [PinSessionController::class, 'store'])->name('session.store');
     Route::get('stats', AdminStatsController::class)->name('stats');
+    Route::post('drive/check', [DriveBackupController::class, 'check'])->name('drive.check');
+    Route::post('drive/retry', [DriveBackupController::class, 'retry'])->name('drive.retry');
     Route::get('captures', [AdminCaptureController::class, 'index'])->name('captures.index');
     Route::patch('captures/{capture}', [AdminCaptureController::class, 'update'])->name('captures.update');
     Route::delete('captures/{capture}', [AdminCaptureController::class, 'destroy'])->name('captures.destroy');

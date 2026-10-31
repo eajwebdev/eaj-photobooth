@@ -48,11 +48,7 @@ class QueueGoogleDriveBackups extends Command
 
         $query->chunkById(100, function ($captures) use (&$queued): void {
             foreach ($captures as $capture) {
-                $capture->update([
-                    'drive_backup_status' => Capture::DRIVE_BACKUP_PENDING,
-                    'drive_backup_error' => null,
-                ]);
-                BackupCaptureToGoogleDrive::dispatch($capture);
+                BackupCaptureToGoogleDrive::queueFor($capture);
                 $queued++;
             }
         });

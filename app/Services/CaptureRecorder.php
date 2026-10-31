@@ -124,11 +124,7 @@ class CaptureRecorder
         GenerateCaptureDerivatives::dispatch($capture);
 
         if (config('services.google_drive.backup_enabled')) {
-            $capture->update([
-                'drive_backup_status' => Capture::DRIVE_BACKUP_PENDING,
-                'drive_backup_error' => null,
-            ]);
-            BackupCaptureToGoogleDrive::dispatch($capture);
+            BackupCaptureToGoogleDrive::queueFor($capture);
         }
 
         return ['capture' => $capture, 'created' => true];

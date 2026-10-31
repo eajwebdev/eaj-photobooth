@@ -52,7 +52,7 @@ class BackupCaptureToGoogleDrive implements ShouldQueue
         } catch (Throwable $exception) {
             $capture->update([
                 'drive_backup_status' => Capture::DRIVE_BACKUP_PENDING,
-                'drive_backup_error' => mb_substr($exception->getMessage(), 0, 1000),
+                'drive_backup_error' => mb_substr($drive->explain($exception), 0, 1000),
             ]);
 
             throw $exception;
@@ -63,7 +63,22 @@ class BackupCaptureToGoogleDrive implements ShouldQueue
     {
         $this->capture->fresh()?->update([
             'drive_backup_status' => Capture::DRIVE_BACKUP_FAILED,
-            'drive_backup_error' => mb_substr((string) $exception?->getMessage(), 0, 1000),
+            'drive_backup_error' => $exception === null
+                ? 'The backup stopped without an error message.'
+                : mb_substr(app(GoogleDriveBackup::class)->explain($exception), 0, 1000),
         ]);
+    }
+
+    /**
+     * Marks the capture as waiting and puts it on the backups queue.
+     */
+    public static function queueFor(Capture $capture): void
+    {
+        $capture->update([
+            'drive_backup_status' => Capture::DRIVE_BACKUP_PENDING,
+            'drive_backup_error' => null,
+        ]);
+
+        static::dispatch($capture);
     }
 }
