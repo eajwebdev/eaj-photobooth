@@ -26,8 +26,8 @@ class GuestbookEntryResource extends JsonResource
             'message' => $this->message,
             'group_tag' => $this->group_tag,
             'table_no' => $this->table_no,
-            'image' => Capture::publicUrl($this->preview_path ?? $this->poster_path ?? $this->media_path),
-            'signature' => Capture::publicUrl($this->signature_path),
+            'image' => $this->previewUrl(),
+            'signature' => $this->fileUrl($this->signature_path),
             'page' => '/p/'.$this->uuid,
             'created_at' => $this->created_at?->toIso8601String(),
         ];

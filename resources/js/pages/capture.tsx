@@ -27,7 +27,8 @@ export default function CapturePage({ capture }: { capture: CaptureData }) {
         setShareError(null);
 
         try {
-            const blob = await (await fetch(capture.urls.media)).blob();
+            // Same-origin route: works whether the file is on this server or in Google Drive.
+            const blob = await (await fetch(capture.urls.download)).blob();
             await navigator.share({ files: [new File([blob], fileName, { type: capture.mime })], title: photobooth.couple.short });
         } catch (error) {
             if (!(error instanceof DOMException && error.name === 'AbortError')) {

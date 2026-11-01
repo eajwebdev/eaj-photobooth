@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\CaptureType;
 use App\Models\Capture;
 use App\Models\Export;
+use App\Services\CaptureFiles;
 use App\Services\Settings;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -27,39 +28,40 @@ class BuildArchiveExport implements ShouldQueue
 
     public function __construct(public Export $export) {}
 
-    public function handle(Settings $settings): void
+    public function handle(Settings $settings, CaptureFiles $files): void
     {
-        $public = Storage::disk('public');
         $private = Storage::disk('local');
         $prefix = (string) $settings->get('download_prefix');
 
         $relativePath = "exports/{$prefix}-{$this->export->uuid}.zip";
+        $zipPath = $private->path($relativePath);
         $private->makeDirectory('exports');
+        $private->delete($relativePath);
 
         $zip = new ZipArchive;
-        if ($zip->open($private->path($relativePath), ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-            throw new RuntimeException('Could not create the export archive.');
-        }
-
         $csv = fopen('php://temp', 'w+');
         fputcsv($csv, ['number', 'type', 'frame', 'guest_name', 'message', 'album', 'station', 'hidden', 'downloads', 'taken_at', 'file']);
 
         Capture::query()
             ->with(['album:id,code', 'layout:id,slug', 'shots'])
             ->orderBy('id')
-            ->chunkById(200, function ($captures) use ($zip, $public, $prefix, $csv): void {
+            ->chunkById(200, function ($captures) use ($zip, $zipPath, $files, $prefix, $csv): void {
+                // One batch at a time: files downloaded from Drive are read when
+                // the archive closes, then deleted before the next batch.
+                $this->open($zip, $zipPath);
+
                 foreach ($captures as $capture) {
                     $folder = $capture->type === CaptureType::Collage ? 'collages' : 'boomerangs';
                     $name = "{$folder}/".$capture->downloadName($prefix);
 
-                    $this->addFile($zip, $public->path($capture->media_path), $name);
+                    $this->addFile($zip, $files->localPath($capture, $capture->media_path), $name);
 
                     foreach ($capture->shots as $shot) {
-                        $this->addFile($zip, $public->path($shot->image_path), sprintf('raw-shots/%04d/%d.jpg', $capture->id, $shot->position));
+                        $this->addFile($zip, $files->localPath($capture, $shot->image_path), sprintf('raw-shots/%04d/%d.jpg', $capture->id, $shot->position));
                     }
 
                     if ($capture->signature_path !== null) {
-                        $this->addFile($zip, $public->path($capture->signature_path), sprintf('signatures/%04d.png', $capture->id));
+                        $this->addFile($zip, $files->localPath($capture, $capture->signature_path), sprintf('signatures/%04d.png', $capture->id));
                     }
 
                     fputcsv($csv, [
@@ -76,14 +78,25 @@ class BuildArchiveExport implements ShouldQueue
                         $name,
                     ]);
                 }
+
+                $zip->close();
+                $files->cleanup();
             });
 
+        $this->open($zip, $zipPath);
         rewind($csv);
         $zip->addFromString('guestbook.csv', (string) stream_get_contents($csv));
         fclose($csv);
         $zip->close();
 
         $this->export->update(['status' => Export::STATUS_READY, 'path' => $relativePath]);
+    }
+
+    private function open(ZipArchive $zip, string $path): void
+    {
+        if ($zip->open($path, ZipArchive::CREATE) !== true) {
+            throw new RuntimeException('Could not create the export archive.');
+        }
     }
 
     public function failed(?Throwable $exception): void
@@ -94,9 +107,9 @@ class BuildArchiveExport implements ShouldQueue
         ]);
     }
 
-    private function addFile(ZipArchive $zip, string $path, string $name): void
+    private function addFile(ZipArchive $zip, ?string $path, string $name): void
     {
-        if (! is_file($path)) {
+        if ($path === null || ! is_file($path)) {
             return;
         }
 

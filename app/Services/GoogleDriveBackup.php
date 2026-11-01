@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use JsonException;
+use Psr\Http\Message\StreamInterface;
 use RuntimeException;
 use Throwable;
 
@@ -48,7 +49,22 @@ class GoogleDriveBackup
             && $this->configurationValue('folder_id') !== null;
     }
 
-    public function backup(Capture $capture): string
+    /**
+     * True when photos are moved to Drive and served from there.
+     */
+    public function storesPhotos(): bool
+    {
+        return config('photobooth.storage') === 'drive' && $this->configured();
+    }
+
+    /**
+     * Copies the capture's files into its own Drive folder. In Drive storage
+     * mode the files guests see (photo, poster, signature) are also made
+     * viewable by link so phones can load them straight from Google.
+     *
+     * @return array{folder_id: string, files: array<string, string>}
+     */
+    public function backup(Capture $capture): array
     {
         if (! $this->configured()) {
             throw new RuntimeException('Google Drive backup is enabled but its OAuth credentials or folder ID are incomplete.');
@@ -56,12 +72,45 @@ class GoogleDriveBackup
 
         $capture->loadMissing('shots');
         $folderId = $capture->drive_folder_id ?: $this->findOrCreateCaptureFolder($capture);
+        $shareable = array_filter([$capture->media_path, $capture->poster_path, $capture->signature_path]);
+        $files = [];
 
         foreach ($this->filesFor($capture) as $file) {
-            $this->uploadOnce($folderId, $file['path'], $file['name'], $capture->uuid);
+            $fileId = $capture->driveFileId($file['path'])
+                ?? $this->uploadOnce($folderId, $file['path'], $file['name'], $capture->uuid);
+
+            if ($this->storesPhotos() && in_array($file['path'], $shareable, true)) {
+                $this->shareWithAnyoneWithLink($fileId);
+            }
+
+            $files[$file['path']] = $fileId;
         }
 
-        return $folderId;
+        return ['folder_id' => $folderId, 'files' => $files];
+    }
+
+    /**
+     * The original bytes of a Drive file, as a stream for large downloads.
+     */
+    public function download(string $fileId): StreamInterface
+    {
+        return $this->request()
+            ->withOptions(['stream' => true])
+            ->get(self::DRIVE_API.'/files/'.rawurlencode($fileId), ['alt' => 'media', 'supportsAllDrives' => 'true'])
+            ->throw()
+            ->toPsrResponse()
+            ->getBody();
+    }
+
+    /**
+     * Moves a Drive file or folder (with everything inside) to the Drive trash,
+     * where it can still be restored for 30 days.
+     */
+    public function trash(string $fileId): void
+    {
+        $this->request()
+            ->patch(self::DRIVE_API.'/files/'.rawurlencode($fileId).'?supportsAllDrives=true', ['trashed' => true])
+            ->throw();
     }
 
     /**
@@ -219,14 +268,12 @@ class GoogleDriveBackup
         return $files;
     }
 
-    private function uploadOnce(string $folderId, string $path, string $name, string $captureUuid): void
+    /**
+     * Uploads a local file unless an earlier attempt already did, and returns its Drive ID.
+     */
+    private function uploadOnce(string $folderId, string $path, string $name, string $captureUuid): string
     {
         $disk = Storage::disk('public');
-
-        if (! $disk->exists($path)) {
-            throw new RuntimeException("The local backup source is missing: {$path}");
-        }
-
         $sourceHash = sha1($path);
         $query = sprintf(
             "trashed = false and '%s' in parents and appProperties has { key='photobooth_source_hash' and value='%s' }",
@@ -244,7 +291,11 @@ class GoogleDriveBackup
         ])->throw()->json('files.0.id');
 
         if (is_string($existing) && $existing !== '') {
-            return;
+            return $existing;
+        }
+
+        if (! $disk->exists($path)) {
+            throw new RuntimeException("The local backup source is missing: {$path}");
         }
 
         $mime = $disk->mimeType($path) ?: 'application/octet-stream';
@@ -257,7 +308,21 @@ class GoogleDriveBackup
             ],
         ];
 
-        $this->multipartUpload($metadata, $mime, (string) $disk->get($path));
+        return $this->multipartUpload($metadata, $mime, (string) $disk->get($path));
+    }
+
+    /**
+     * Lets anyone holding the file's (unguessable) link view it, which is what
+     * allows phones to load it from Google's image servers.
+     */
+    private function shareWithAnyoneWithLink(string $fileId): void
+    {
+        $this->request()
+            ->post(self::DRIVE_API.'/files/'.rawurlencode($fileId).'/permissions?supportsAllDrives=true', [
+                'role' => 'reader',
+                'type' => 'anyone',
+            ])
+            ->throw();
     }
 
     /**
@@ -265,7 +330,7 @@ class GoogleDriveBackup
      *
      * @throws JsonException
      */
-    private function multipartUpload(array $metadata, string $mime, string $bytes): void
+    private function multipartUpload(array $metadata, string $mime, string $bytes): string
     {
         $boundary = 'photobooth_'.Str::random(32);
         $body = "--{$boundary}\r\n"
@@ -276,10 +341,17 @@ class GoogleDriveBackup
             .$bytes."\r\n"
             ."--{$boundary}--";
 
-        $this->request()
+        $fileId = $this->request()
             ->withBody($body, "multipart/related; boundary={$boundary}")
             ->post(self::DRIVE_UPLOAD_API.'/files?uploadType=multipart&supportsAllDrives=true&fields=id')
-            ->throw();
+            ->throw()
+            ->json('id');
+
+        if (! is_string($fileId) || $fileId === '') {
+            throw new RuntimeException('Google Drive did not return an ID for an uploaded file.');
+        }
+
+        return $fileId;
     }
 
     private function request(): PendingRequest

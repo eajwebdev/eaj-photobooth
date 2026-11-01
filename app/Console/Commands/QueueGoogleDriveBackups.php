@@ -22,7 +22,7 @@ class QueueGoogleDriveBackups extends Command
      *
      * @var string
      */
-    protected $description = 'Queue local captures for backup to the configured Google Drive folder';
+    protected $description = 'Queue local captures for backup to Google Drive (with PHOTOBOOTH_STORAGE=drive: move every capture still on this server)';
 
     /**
      * Execute the console command.
@@ -37,7 +37,10 @@ class QueueGoogleDriveBackups extends Command
 
         $query = Capture::query()->orderBy('id');
 
-        if (! $this->option('force')) {
+        if ($drive->storesPhotos()) {
+            // Drive storage: everything still on this server moves, backed up or not.
+            $query->whereNull('stored_in_drive_at');
+        } elseif (! $this->option('force')) {
             $query->where(function ($pending): void {
                 $pending->whereNull('drive_backup_status')
                     ->orWhere('drive_backup_status', '!=', Capture::DRIVE_BACKUP_COMPLETE);

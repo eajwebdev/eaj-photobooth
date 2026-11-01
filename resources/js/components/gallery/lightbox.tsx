@@ -106,7 +106,8 @@ export function Lightbox({ items, index, onMove, onClose, onNearEnd, showAlbumLi
         setShareState('busy');
 
         try {
-            const blob = await (await fetch(capture.urls.media)).blob();
+            // Same-origin route: works whether the file is on this server or in Google Drive.
+            const blob = await (await fetch(capture.urls.download)).blob();
             await navigator.share({ files: [new File([blob], fileName, { type: capture.mime })], title: photobooth.couple.short });
             setShareState('idle');
         } catch (error) {

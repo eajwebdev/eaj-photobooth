@@ -27,6 +27,8 @@ interface DriveError {
 interface DriveBackup {
     enabled: boolean;
     configured: boolean;
+    stores_photos: boolean;
+    stored_in_drive: number;
     complete: number;
     pending: number;
     failed: number;
@@ -97,7 +99,14 @@ function DriveBackupSection({ backup, onLocked }: { backup: DriveBackup; onLocke
 
     return (
         <section className="border-gold-light/20 flex flex-col gap-3 rounded-2xl border p-5">
-            <h2 className="font-display text-gold-light text-xl italic">Google Drive backup</h2>
+            <h2 className="font-display text-gold-light text-xl italic">{backup.stores_photos ? 'Google Drive storage' : 'Google Drive backup'}</h2>
+
+            {backup.stores_photos && (
+                <p className="text-mist/80 text-sm">
+                    Photos are stored in Google Drive: {backup.stored_in_drive.toLocaleString()} moved. New photos wait on this server until the
+                    backups worker moves them, usually within a minute.
+                </p>
+            )}
 
             {!backup.configured && (
                 <p className="text-sm text-[#f0b3aa]">

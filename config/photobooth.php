@@ -127,6 +127,14 @@ return [
         'max_tiles' => 1500,
     ],
 
+    /*
+    | Where photos live long term. "local" keeps them on this server. "drive"
+    | moves each capture to the Google Drive backup folder once it is copied
+    | there, deletes the server copies and serves the gallery from Drive.
+    | Needs GOOGLE_DRIVE_BACKUP_ENABLED=true and its credentials.
+    */
+    'storage' => env('PHOTOBOOTH_STORAGE', 'local'),
+
     'media' => [
         'thumb_width' => 520,
         'thumb_max_bytes' => 60 * 1024,

@@ -6,8 +6,13 @@ use App\Models\Capture;
 use App\Services\GoogleDriveBackup;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Storage;
 use Throwable;
 
+/**
+ * Copies a capture to Google Drive. In Drive storage mode it then deletes the
+ * server copies, and the gallery loads the photo from Drive from then on.
+ */
 class BackupCaptureToGoogleDrive implements ShouldQueue
 {
     use Queueable;
@@ -27,11 +32,28 @@ class BackupCaptureToGoogleDrive implements ShouldQueue
         $this->afterCommit();
     }
 
+    /**
+     * Seconds to wait for the gallery thumbnail before moving files off the server.
+     */
+    private const DERIVATIVES_WAIT_SECONDS = 30;
+
     public function handle(GoogleDriveBackup $drive): void
     {
         $capture = $this->capture->fresh(['shots']);
+        $moveToDrive = $drive->storesPhotos();
 
-        if ($capture === null || $capture->drive_backup_status === Capture::DRIVE_BACKUP_COMPLETE) {
+        if ($capture === null || $capture->isStoredInDrive()) {
+            return;
+        }
+
+        if ($capture->drive_backup_status === Capture::DRIVE_BACKUP_COMPLETE && ! $moveToDrive) {
+            return;
+        }
+
+        // The thumbnail job reads the local photo; let it finish before the files leave.
+        if ($moveToDrive && $capture->thumb_path === null && $this->attempts() < 3) {
+            $this->release(self::DERIVATIVES_WAIT_SECONDS);
+
             return;
         }
 
@@ -41,14 +63,20 @@ class BackupCaptureToGoogleDrive implements ShouldQueue
         ]);
 
         try {
-            $folderId = $drive->backup($capture);
+            $result = $drive->backup($capture);
 
             $capture->update([
                 'drive_backup_status' => Capture::DRIVE_BACKUP_COMPLETE,
-                'drive_folder_id' => $folderId,
+                'drive_folder_id' => $result['folder_id'],
+                'drive_files' => $result['files'],
                 'drive_backed_up_at' => now(),
                 'drive_backup_error' => null,
+                'stored_in_drive_at' => $moveToDrive ? now() : null,
             ]);
+
+            if ($moveToDrive) {
+                Storage::disk('public')->delete($capture->storedPaths());
+            }
         } catch (Throwable $exception) {
             $capture->update([
                 'drive_backup_status' => Capture::DRIVE_BACKUP_PENDING,

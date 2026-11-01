@@ -6,6 +6,7 @@ use App\Enums\CaptureType;
 use App\Enums\GuestGroup;
 use App\Models\Capture;
 use App\Models\Export;
+use App\Services\CaptureFiles;
 use App\Services\Settings;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\CarbonImmutable;
@@ -28,12 +29,13 @@ class BuildGuestbookPdf implements ShouldQueue
 
     public function __construct(public Export $export) {}
 
-    public function handle(Settings $settings): void
+    public function handle(Settings $settings, CaptureFiles $files): void
     {
         // Hundreds of photo pages: give the renderer room to work.
         ini_set('memory_limit', '1536M');
 
         $public = Storage::disk('public');
+        $previewWidth = (int) config('photobooth.media.preview_width');
         $fontCache = storage_path('app/private/dompdf');
 
         if (! is_dir($fontCache)) {
@@ -45,10 +47,13 @@ class BuildGuestbookPdf implements ShouldQueue
             ->guestbookEntries()
             ->orderBy('id')
             ->get()
-            ->map(function (Capture $capture) use ($public): array {
-                $image = $capture->type === CaptureType::Boomerang
-                    ? $capture->poster_path
-                    : ($capture->preview_path ?? $capture->media_path);
+            ->map(function (Capture $capture) use ($files, $previewWidth): array {
+                $isBoomerang = $capture->type === CaptureType::Boomerang;
+
+                // Photos in Drive have no preview file; Google resizes the original instead.
+                $image = $capture->isStoredInDrive()
+                    ? $files->localPath($capture, $isBoomerang ? $capture->poster_path : $capture->media_path, $previewWidth)
+                    : $files->localPath($capture, $isBoomerang ? $capture->poster_path : ($capture->preview_path ?? $capture->media_path));
 
                 return [
                     'name' => $capture->guest_name,
@@ -56,8 +61,8 @@ class BuildGuestbookPdf implements ShouldQueue
                     'group' => GuestGroup::labelFor($capture->group_tag),
                     'table' => $capture->table_no,
                     'time' => $capture->created_at?->timezone(config('app.timezone'))->format('g:i A'),
-                    'image' => $image !== null && $public->exists($image) ? $public->path($image) : null,
-                    'signature' => $capture->signature_path !== null && $public->exists($capture->signature_path) ? $public->path($capture->signature_path) : null,
+                    'image' => $image,
+                    'signature' => $files->localPath($capture, $capture->signature_path),
                 ];
             });
 
@@ -90,6 +95,7 @@ class BuildGuestbookPdf implements ShouldQueue
         $prefix = (string) $settings->get('download_prefix');
         $relativePath = "exports/{$prefix}-Guestbook-".substr($this->export->uuid, 0, 8).'.pdf';
         Storage::disk('local')->put($relativePath, $pdf->output());
+        $files->cleanup();
 
         $this->export->update(['status' => Export::STATUS_READY, 'path' => $relativePath]);
     }

@@ -5,6 +5,7 @@ use App\Models\Capture;
 use App\Models\Mosaic;
 use App\Services\Settings;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
@@ -49,6 +50,24 @@ it('builds the mosaic from guest collages at the configured size', function () {
     [$width, $height] = getimagesizefromstring(Storage::disk('public')->get($mosaic->output_path));
     expect([$width, $height])->toBe([120, 180]);
     Storage::disk('public')->assertExists($mosaic->preview_path);
+});
+
+it('builds tiles from collages stored in Drive at tile size', function () {
+    Storage::fake('public');
+    Storage::fake('local');
+    smallMosaicGrid();
+    Capture::factory()->count(3)->storedInDrive()->create();
+    Storage::disk('local')->put('mosaics/source.jpg', UploadedFile::fake()->image('couple.jpg', 300, 450)->getContent());
+    $mosaic = Mosaic::query()->create(['source_path' => 'mosaics/source.jpg', 'status' => Mosaic::STATUS_PENDING]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://lh3.googleusercontent.com/d/drive-media=w20' => Http::response(UploadedFile::fake()->image('t.jpg', 20, 30)->getContent()),
+    ]);
+
+    (new BuildMosaic($mosaic))->handle();
+
+    expect($mosaic->refresh()->tiles)->toBe(3);
+    Http::assertSentCount(3);
 });
 
 it('fails with a clear message when there are no collages yet', function () {

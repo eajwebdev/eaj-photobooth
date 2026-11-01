@@ -56,4 +56,25 @@ class CaptureFactory extends Factory
     {
         return $this->state(fn (): array => ['is_hidden' => true]);
     }
+
+    /**
+     * Moved to Google Drive: the server copies are gone and the gallery loads
+     * the photo from Drive. The media file's Drive ID is "drive-media", the
+     * poster's (boomerangs) "drive-poster".
+     */
+    public function storedInDrive(): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'thumb_path' => "thumbs/20261212/{$attributes['uuid']}.jpg",
+            'preview_path' => "previews/20261212/{$attributes['uuid']}.jpg",
+            'drive_backup_status' => Capture::DRIVE_BACKUP_COMPLETE,
+            'drive_folder_id' => 'capture-folder',
+            'drive_files' => array_filter([
+                $attributes['media_path'] => 'drive-media',
+                ($attributes['poster_path'] ?? '') => isset($attributes['poster_path']) ? 'drive-poster' : null,
+            ]),
+            'drive_backed_up_at' => now(),
+            'stored_in_drive_at' => now(),
+        ]);
+    }
 }

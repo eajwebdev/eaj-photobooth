@@ -9,6 +9,10 @@ use GdImage;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\Response;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 use Throwable;
@@ -32,6 +36,9 @@ class BuildMosaic implements ShouldBeUnique, ShouldQueue
 
     /** Keeps one photo from being repeated all over the picture. */
     private const REUSE_PENALTY = 18.0;
+
+    /** Tiles fetched from Google Drive at the same time. */
+    private const DRIVE_FETCH_BATCH = 20;
 
     public function __construct(public Mosaic $mosaic) {}
 
@@ -151,7 +158,6 @@ class BuildMosaic implements ShouldBeUnique, ShouldQueue
      */
     private function loadTiles(int $size, int $max): array
     {
-        $public = Storage::disk('public');
         $tiles = [];
 
         $captures = Capture::query()
@@ -160,26 +166,59 @@ class BuildMosaic implements ShouldBeUnique, ShouldQueue
             ->whereNotNull('thumb_path')
             ->latest('id')
             ->limit($max)
-            ->pluck('thumb_path');
+            ->get(['id', 'media_path', 'poster_path', 'thumb_path', 'mime', 'drive_files', 'stored_in_drive_at']);
 
-        foreach ($captures as $path) {
-            if (! $public->exists($path)) {
-                continue;
+        foreach ($captures->chunk(self::DRIVE_FETCH_BATCH) as $batch) {
+            foreach ($this->thumbnailBytes($batch, $size) as $bytes) {
+                try {
+                    $image = $this->loadImage($bytes);
+                } catch (RuntimeException) {
+                    continue;
+                }
+
+                $square = $this->cropToAspect($image, 1);
+                $tile = imagecreatetruecolor($size, $size);
+                imagecopyresampled($tile, $square, 0, 0, 0, 0, $size, $size, imagesx($square), imagesy($square));
+                $tiles[] = ['image' => $tile, 'colour' => $this->averageColour($tile)];
             }
-
-            try {
-                $image = $this->loadImage((string) $public->get($path));
-            } catch (RuntimeException) {
-                continue;
-            }
-
-            $square = $this->cropToAspect($image, 1);
-            $tile = imagecreatetruecolor($size, $size);
-            imagecopyresampled($tile, $square, 0, 0, 0, 0, $size, $size, imagesx($square), imagesy($square));
-            $tiles[] = ['image' => $tile, 'colour' => $this->averageColour($tile)];
         }
 
         return $tiles;
+    }
+
+    /**
+     * Thumbnail bytes for each capture: the server thumbnail, or for photos
+     * that live in Drive a copy Google resizes to tile size, fetched in parallel.
+     *
+     * @param  Collection<int, Capture>  $captures
+     * @return list<string>
+     */
+    private function thumbnailBytes(Collection $captures, int $size): array
+    {
+        $public = Storage::disk('public');
+        $inDrive = $captures->filter(fn (Capture $capture): bool => $capture->isStoredInDrive());
+
+        $responses = $inDrive->isEmpty() ? [] : Http::pool(fn (Pool $pool): array => $inDrive
+            ->map(fn (Capture $capture) => $pool->as((string) $capture->id)
+                ->timeout(20)
+                ->get((string) $capture->fileUrl($capture->poster_path ?? $capture->media_path, $size)))
+            ->all());
+
+        $bytes = [];
+
+        foreach ($captures as $capture) {
+            if ($capture->isStoredInDrive()) {
+                $response = $responses[(string) $capture->id] ?? null;
+
+                if ($response instanceof Response && $response->successful()) {
+                    $bytes[] = $response->body();
+                }
+            } elseif ($public->exists($capture->thumb_path)) {
+                $bytes[] = (string) $public->get($capture->thumb_path);
+            }
+        }
+
+        return $bytes;
     }
 
     /**

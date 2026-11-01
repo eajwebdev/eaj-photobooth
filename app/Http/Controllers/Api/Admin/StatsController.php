@@ -61,6 +61,8 @@ class StatsController extends Controller
                 'drive_backup' => [
                     'enabled' => $drive->enabled(),
                     'configured' => $drive->configured(),
+                    'stores_photos' => $drive->storesPhotos(),
+                    'stored_in_drive' => Capture::query()->whereNotNull('stored_in_drive_at')->count(),
                     'complete' => Capture::query()->where('drive_backup_status', Capture::DRIVE_BACKUP_COMPLETE)->count(),
                     'pending' => Capture::query()->whereIn('drive_backup_status', [
                         Capture::DRIVE_BACKUP_PENDING,

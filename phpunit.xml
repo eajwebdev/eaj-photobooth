@@ -28,6 +28,7 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="GOOGLE_DRIVE_BACKUP_ENABLED" value="false"/>
+        <env name="PHOTOBOOTH_STORAGE" value="local"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
     </php>

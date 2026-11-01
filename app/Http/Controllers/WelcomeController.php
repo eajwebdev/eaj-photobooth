@@ -29,10 +29,10 @@ class WelcomeController extends Controller
                 ->where('type', CaptureType::Collage)
                 ->latest('id')
                 ->limit(self::ATTRACT_COLLAGES)
-                ->get(['uuid', 'media_path', 'preview_path', 'dominant_color'])
+                ->get(['uuid', 'media_path', 'poster_path', 'preview_path', 'mime', 'dominant_color', 'drive_files', 'stored_in_drive_at'])
                 ->map(fn (Capture $capture): array => [
                     'uuid' => $capture->uuid,
-                    'image' => Capture::publicUrl($capture->preview_path ?? $capture->media_path),
+                    'image' => $capture->previewUrl(),
                     'color' => $capture->dominant_color,
                 ])
                 ->all(),
